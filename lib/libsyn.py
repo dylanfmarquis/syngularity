@@ -1,8 +1,12 @@
+#import sys
+#sys.path.append('../lib')
 import os
 import time
 import pyinotify
 import sys
+import datetime
 import ConfigParser
+from libmsgq import *
 from stat import *
 from time import strftime as date
 
@@ -29,50 +33,53 @@ class Logging(object):
         os.fsync(self.log)
         return 0
 
-class inspect(object):
-    def delta(term):
-        """
-        if term - mtime stat:
-            check md5
-            if different:
-                check w/ other sources
-                if different:
-                    sync
-        """
+class sync(object):
+    config = ConfigParser.RawConfigParser()
+    config.read('../conf/syngularity.conf')
+    args = '{0} {1} {2}'.format(config.get('sync','rsync_binary'), '-ltrp', '--delete')
 
-class scan(object):
-    def __init__(self):
-        config = ConfigParser.RawConfigParser()
-        config.read('../conf/syngularity.conf')
-        with open(config.get('general','termination_file'), 'r') as f:
-            term = f.read()
+class delta(object):
+    def __init__(self,top, csn):
+        self.top = top
+        self.csn = csn
+        self.array = []
 
-    def init(self, top):
-        inspect = inspect()
-        try:
-		    Walk().walktree(top, term)
-        except Exception as e:
-            Logging().write('e',\
-                'Rectification scan could not be performed{0}'.format(e))
-        #Kill Thread
-        sys.exit(0)
+    def scan(self):
+        self.walktree(self.top,self.inspect)
+        return self.array
 
-class Walk(object):
+    def inspect(self, path):
+        if os.stat(path) > self.csn:
+            self.array.append(path)
+
 
     def walktree(self, top, callback):
-        '''recursively descend the directory tree rooted at top'''
         for f in os.listdir(top):
             pathname = os.path.join(top, f)
             mode = os.stat(pathname).st_mode
             if S_ISDIR(mode):
-                # It's a directory, recurse into it
                 self.walktree(pathname, callback)
             elif S_ISREG(mode):
-                # It's a file, call the callback function
-                callback(l_compiled,pathname)
+                callback(pathname)
             else:
-                # Unknown file type, print a message
                 pass
+
+class peer_exec(object):
+
+    def __init__(self, peers):
+        self.handles = self.open_handles(peers)
+
+
+    def open_handles(self, peers):
+        d = {}
+        for peer in peers:
+            peer = peer.split(':')
+            d[peer[0]] = client(peer[0], peer[1])
+        return d
+
+    def send(self, msg):
+        for handle in self.handles:
+            self.handles[handle].send(msg)
 
 def daemonize():
     try:
@@ -80,9 +87,9 @@ def daemonize():
         if pid > 0:
             #Exit first parent
             sys.exit(0)
-        except OSError, e:
-            sys.stderr.write("fork #1 failed: %d (%s)\n" % (e.errno, e.strerror))
-            sys.exit(1)
+    except OSError, e:
+        sys.stderr.write("fork #1 failed: %d (%s)\n" % (e.errno, e.strerror))
+        sys.exit(1)
 
         #Change working directory, change group leader
         os.chdir("/")
