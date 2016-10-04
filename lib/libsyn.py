@@ -5,12 +5,15 @@ import time
 import pyinotify
 import sys
 import datetime
+import subprocess
 import ConfigParser
 from libmsgq import *
 from stat import *
 from time import strftime as date
+from subprocess import PIPE
+from subprocess import Popen as popen
 
-class Logging(object):
+class logging(object):
     def __init__(self):
         self.log = self.open()
 
@@ -25,6 +28,8 @@ class Logging(object):
                 return 'ERROR'
         if lvl == 'i':
                 return 'INFO'
+        if lvl == 'd':
+                return 'DEBUG'
 
     def write(self, level, msg):
         self.log.write("[{0}] [{1}]: {2}\n"\
@@ -34,9 +39,46 @@ class Logging(object):
         return 0
 
 class sync(object):
-    config = ConfigParser.RawConfigParser()
-    config.read('../conf/syngularity.conf')
-    args = '{0} {1} {2}'.format(config.get('sync','rsync_binary'), '-ltrp', '--delete')
+    def __init__(self):
+        config = ConfigParser.RawConfigParser()
+        config.read('../conf/syngularity.conf')
+        self.lvl = config.get('general','log_level')
+        if self.lvl is 'DEBUG':
+            self.log = logging()
+        self.user = config.get('sync','user')
+        self.target = config.get('sync','target_path')
+        self.rsync_bin = config.get('sync','rsync_binary')
+        self.cmd = self.rsync_config()
+
+    def rsync_config(self):
+        config = ConfigParser.RawConfigParser()
+        args = '{0} {1} {2}'.format(self.rsync_bin, '-ltrp', '--delete')
+        if configchk('sync','exclude') is not None:
+            args += ' --exclude {0}'.format(config.get('sync','exclude'))
+        return args
+
+    def state_transfer(self, recipient):
+        logging().write('i','State transfer requested by {0}'.format(recipient))
+        #health = 3
+        p = subprocess.Popen('{0} {1} {2}@{3}:{1}'\
+                .format(self.cmd, self.target, self.user, recipient))
+        p.communicate()
+        #health = 0
+        logging().write('i','State transfer with {0} complete'.format(recipient))
+        return 0
+
+    def file_sync(self, path, recipient):
+        try:
+            p = subprocess.Popen('{0} {1} {2}@{3}:{1}'\
+                    .format(self.cmd, path, self.user, recipient),shell=True)
+            if self.lvl is 'DEBUG':
+                self.log.write('d', '{0} - Sync - {1}'.format(recipient, path))
+        except:
+            logging().write('e', '{0} - Failed - {1}'.format(recipient, path))
+
+    def push(self, path, peers):
+        for peer in peers:
+            self.file_sync(path, peer.split(':')[0])
 
 class delta(object):
     def __init__(self,top, csn):
@@ -80,6 +122,14 @@ class peer_exec(object):
     def send(self, msg):
         for handle in self.handles:
             self.handles[handle].send(msg)
+
+def configchk(section, config):
+    config = ConfigParser.RawConfigParser()
+    config.read('../conf/syngularity.conf')
+    try:
+        return config.get(section,config)
+    except:
+        return None
 
 def daemonize():
     try:

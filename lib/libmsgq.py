@@ -6,6 +6,8 @@ class client(object):
 
     def __init__(self, host, port):
         self.sock = self.init_socket(host, port)
+        self.host = host
+        self.port = port
 
     def init_socket(self, host, port):
         context = zmq.Context()
@@ -17,21 +19,22 @@ class client(object):
         for i in range(10):
             self.sock.send(msg)
             r = self.sock.recv()
-            if 'RESP' in r:
+            if 'REP' in r:
                 return r
         else:
             return 1
 
-    def health_check(self, host):
-        r = self.send('REQ|HEALCHK||{0}'.format(host))
+    def health_check(self):
+        r = self.send('REQ|HEALCHK||{0}'.format(self.host))
         return r
 
-    def peer(self, host):
-        r = self.send('REQ|PEER||{0}'.format(host))
+    def peer(self):
+        r = self.send('REQ|PEER||{0}'.format(self.host))
         return r
 
-    def state_transfer(self, host):
-        r = self.send('REQ|STATE_XFER||{0}'.format(host))
+    def state_transfer(self):
+        r = self.send('REQ|STATE_XFER||{0}'.format(self.host))
+        return r.split('|')
 
 def mq_server(port, callback):
     context = zmq.Context()

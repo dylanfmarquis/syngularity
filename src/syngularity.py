@@ -30,29 +30,38 @@ if __name__ == "__main__":
 
     config = ConfigParser.RawConfigParser()
     config.read('../conf/syngularity.conf')
-    target = config.get('general','target_path')
+    bootstrap = config.get('general','boostrap_mode')
+    target = config.get('sync','target_path')
     freq = config.get('sync','frequency')
     peers = config.get('general','peers').split(',')
 
     peer = peer_exec(peers)
 
-    p = Process(target=sync.st, args=[target, peer])
-    p.daemon = True
-    p.start()
+    if bootstrap is 'no':
+        for peer in peers:
+            p = peer.split(':')
+            r = client(p[0], p[1]).state_transfer()
+            if r[3] is '0':
+                break
 
-    l = Process(target=mq_server, args=('5555', pr))
+    l = Process(target=mq_server, args=('5555', ServerReqHandler))
     l.daemon = True
     l.start()
+
+    sync = sync()
 
     wm = pyinotify.WatchManager()
     mask = pyinotify.IN_MODIFY | pyinotify.IN_CREATE | pyinotify.IN_DELETE
 
     class EventHandler(pyinotify.ProcessEvent):
         def process_IN_CREATE(self, event):
+            sync.push(event.pathname, peers)
 
         def process_IN_MODIFY(self, event):
+            sync.push(event.pathname, peers)
 
         def process_IN_DELETE(self, event):
+            sync.push(event.pathname, peers)
 
     notifier = pyinotify.AsyncNotifier(wm, EventHandler(), read_freq=freq)
     wdd = wm.add_watch(target, mask, rec=True, auto_add=True)
