@@ -5,6 +5,7 @@ import time
 import pyinotify
 import sys
 import datetime
+import threading
 import subprocess
 import ConfigParser
 from libmsgq import *
@@ -52,7 +53,7 @@ class sync(object):
 
     def rsync_config(self):
         config = ConfigParser.RawConfigParser()
-        args = '{0} {1} {2}'.format(self.rsync_bin, '-ltrp', '--delete')
+        args = '{0} {1} {2}'.format(self.rsync_bin, '-ltrRp', '--delete')
         if configchk('sync','exclude') is not None:
             args += ' --exclude {0}'.format(config.get('sync','exclude'))
         return args
@@ -67,20 +68,51 @@ class sync(object):
         logging().write('i','State transfer with {0} complete'.format(recipient))
         return 0
 
+
     def file_sync(self, path, recipient):
         try:
-            p = subprocess.Popen('{0} {1} {2}@{3}:{1}'\
+            p = subprocess.Popen('{0} {1} {2}@{3}:/'\
                     .format(self.cmd, path, self.user, recipient),shell=True)
+            p.communicate()
             if self.lvl is 'DEBUG':
                 self.log.write('d', '{0} - Sync - {1}'.format(recipient, path))
         except:
-            logging().write('e', '{0} - Failed - {1}'.format(recipient, path))
+            logging().write('e', '{0} - Sync Failed - {1}'.format(recipient, path))
 
     def push(self, path, peers):
         for peer in peers:
             self.file_sync(path, peer.split(':')[0])
 
+    def file_del(self, path, recipient):
+       try:
+            p = subprocess.Popen('ssh {0}@{1} "rm -rf {2}"'\
+                    .format( self.user, recipient, path),shell=True)
+            p.communicate()
+            if self.lvl is 'DEBUG':
+                self.log.write('d', '{0} - Delete - {1}'.format(recipient, path))
+       except:
+            logging().write('e', '{0} - Delete Failed - {1}'.format(recipient, path))
+
+    def delete(self, path, peers):
+        for peer in peers:
+            self.file_del(path, peer.split(':')[0])
+
+
+def worker(q, peers, sync):
+    while True:
+        while not q.empty():
+            job = q.get(block=True)
+            try:
+                if job[0] is 0:
+                    sync.push(job[1], peers)
+                else:
+                    sync.delete(job[1], peers)
+                q.task_done()
+            except:
+                continue
+
 class delta(object):
+
     def __init__(self,top, csn):
         self.top = top
         self.csn = csn
