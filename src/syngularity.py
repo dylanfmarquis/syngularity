@@ -24,44 +24,57 @@ health = 1
 
 if __name__ == "__main__":
 
+    mkdir_p('../var')
+    mkdir_p('../var/log')
+    mkdir_p('../var/keys')
+
+    config = ConfigParser.RawConfigParser()
+    config.read('../conf/syngularity.conf')
+    target = config.get('sync','target_path')
+    freq = config.get('sync','frequency')
+    peers = config.get('general','peers').split(',')
+    log = logging()
+
+    log.write('i', 'Starting Singularity...')
+
+    keys = keys()
+
     #ret = daemonize()
     #if ret is not 0:
     #    print 'exit: ' + ret
     #    sys.exit()
 
-    config = ConfigParser.RawConfigParser()
-    config.read('../conf/syngularity.conf')
     bootstrap = config.get('general','boostrap_mode')
-    target = config.get('sync','target_path')
-    freq = config.get('sync','frequency')
-    peers = config.get('general','peers').split(',')
 
-#    peer = peer_exec(peers)
+    #MAKE SURE IT'S RECEIVING UPDATES WHILE ITS STATE TRANSFERRING
+    if 'disabled' in bootstrap:
+        for peer in peers:
+            l = peer.split(':')
+            client(l[0],l[1]).peer(keys)
+        state_request(peers, log)
 
-#    if bootstrap is 'no':
-#        for peer in peers:
-#            p = peer.split(':')
-#            r = client(p[0], p[1]).state_transfer()
-#            if r[3] is '0':
-#                break
+    sync = sync()
 
-    l = Process(target=mq_server, args=('5555', ServerReqHandler))
+    log.write('i', 'Starting MQ server')
+    l = Process(target=mq_server, args=('5555', ServerReqHandler, sync, keys, log))
     l.daemon = True
     l.start()
 
     ext_exclude = re.compile('^.*(.swp|.swpx)$')
 
-    sync = sync()
-    #taskmaster = taskmaster()
     q = Queue()
 
+    log.write('i', 'Starting worker threads')
     for i in range(int(config.get('sync','workers'))):
         t = threading.Thread(target=worker, args=(q, peers, sync))
         t.start()
 
+    log.write('i', 'Enabling inotify event watch')
     wm = pyinotify.WatchManager()
-    mask = pyinotify.IN_MODIFY | pyinotify.IN_CREATE | pyinotify.IN_DELETE
+    mask = pyinotify.IN_MOVED_TO | pyinotify.IN_MOVED_FROM | pyinotify.IN_CLOSE_WRITE\
+            | pyinotify.IN_CREATE | pyinotify.IN_DELETE
 
+    # USE MASK TO REMOVE PEERS THAT AREN'T UP
     class EventHandler(pyinotify.ProcessEvent):
         def process_IN_CREATE(self, event):
             if ext_exclude.findall(event.pathname):
@@ -71,12 +84,14 @@ if __name__ == "__main__":
 
         def process_IN_MOVED_TO(self, event):
             if ext_exclude.findall(event.pathname):
+                print event.pathname
                 pass
             else:
                 q.put([0, event.pathname])
 
         def process_IN_MOVED_FROM(self, event):
             if ext_exclude.findall(event.pathname):
+                print event.pathname
                 pass
             else:
                 q.put([1, event.pathname])

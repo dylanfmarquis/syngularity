@@ -8,6 +8,7 @@ class client(object):
         self.sock = self.init_socket(host, port)
         self.host = host
         self.port = port
+        self.origin = socket.gethostbyname(socket.gethostname())
 
     def init_socket(self, host, port):
         context = zmq.Context()
@@ -25,35 +26,41 @@ class client(object):
             return 1
 
     def health_check(self):
-        r = self.send('REQ|HEALCHK||{0}'.format(self.host))
+        r = self.send('REQ|HEALCHK||{0}'.format(self.origin))
         return r
 
-    def peer(self):
-        r = self.send('REQ|PEER||{0}'.format(self.host))
-        return r
+    def peer(self, keys):
+        r = self.send('REQ|PEER|{0}|{1}'.format(keys.public, self.origin))
+        keys.store(self.host,r)
+        return 0
 
     def state_transfer(self):
-        r = self.send('REQ|STATE_XFER||{0}'.format(self.host))
+        r = self.send('REQ|STATE_XFER||{0}'.format(self.origin))
         return r.split('|')
 
-def mq_server(port, callback):
+def mq_server(port, callback, sync, keys, log):
     context = zmq.Context()
     sock = context.socket(zmq.REP)
     sock.bind("tcp://*:{0}".format(port))
     while True:
         message = sock.recv()
-        ret = callback(message)
+        ret = callback(message, sync, keys, log)
         sock.send(ret)
 
 def repbuild(resp, payload):
     return ('REP|{0}|{1}|{2}').format(resp, payload, socket.gethostbyname(socket.gethostname()))
 
-def ServerReqHandler(msg):
+def ServerReqHandler(msg, sync, keys, log):
     req = msg.split('|')
     if 'HEALCHK' in req[1]:
         return repbuild('HEALCHK', health)
+
     if 'PEER' in req[1]:
-        return repbuild('PEER', 0)
+        log.write('i','{0} has made a peer request'.format(req[3]))
+        keys.store(req[3], req[2])
+        log.write('i','{0} joined with cluster'.format(req[3]))
+        return repbuild('PEER', keys.public)
+
     if 'STATE_XFER' in req[1]:
-        #State Transfer
+        sync.state_transfer(req[3])
         return repbuild('STATE_XFER', 0)

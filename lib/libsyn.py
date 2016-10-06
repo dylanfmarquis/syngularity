@@ -7,14 +7,19 @@ import sys
 import datetime
 import threading
 import subprocess
+import base64
 import ConfigParser
 from libmsgq import *
 from stat import *
+from pwd import getpwnam
 from time import strftime as date
 from subprocess import PIPE
 from subprocess import Popen as popen
+from Crypto.PublicKey import RSA
+
 
 class logging(object):
+
     def __init__(self):
         self.log = self.open()
 
@@ -39,7 +44,66 @@ class logging(object):
         os.fsync(self.log)
         return 0
 
+class keys(object):
+    def __init__(self):
+        keys = self.keypair()
+        self.private = keys[0]
+        self.public = self.public_format(keys[1])
+
+    def keypair(self):
+        if os.path.isfile('../var/keys/private.key')\
+                and os.path.isfile('../var/keys/public.key'):
+            keys = []
+            with open ('../var/keys/private.key', 'r') as priv:
+                keys.append(priv.read())
+            with open('../var/keys/public.key', 'r') as pub:
+                keys.append(pub.read())
+            return keys
+        else:
+            keys = []
+            key = RSA.generate(2048)
+            keys.append(key.exportKey("PEM"))
+            keys.append(key.publickey().exportKey("PEM"))
+            with open ('../var/keys/private.key', 'w') as priv:
+                priv.write(keys[0])
+            with open('../var/keys/public.key', 'w') as pub:
+                pub.write(keys[1])
+            return keys
+
+    def store(self, host, key):
+        id = base64.b64encode(host)
+        with open('../var/keys/{0}'.format(id), 'w') as f:
+            f.write(key)
+        config = ConfigParser.RawConfigParser()
+        config.read('../conf/syngularity.conf')
+        user = config.get('sync','user')
+        home = os.path.expanduser('~{0}'.format(user))
+        auth_keys_path = '{0}/.ssh/authorized_keys'.format(home)
+
+        if not os.path.isfile(auth_keys_path):
+            open(auth_keys_path, 'a').close()
+            os.chmod(auth_keys_path, 600)
+            try:
+                os.chown(auth_keys_path, getpwnam(user).pw_uid, getpwnam(user).pw_gid)
+            except:
+                os.chown(auth_keys_path, getpwnam(user).pw_uid, 0)
+
+        with open(auth_keys_path, 'ab+') as f:
+            contents = f.readlines()
+            for line in contents:
+                if key in line:
+                    return 0
+            f.write('ssh-rsa {0} {1}@{2}'.format(key, user, id))
+            return 0
+
+    def public_format(self, public):
+        return public.replace('-----BEGIN PUBLIC KEY-----', '')\
+                     .replace('-----END PUBLIC KEY-----', '')\
+                     .replace('\r', '').replace('\n', '')
+
+
 class sync(object):
+
     def __init__(self):
         config = ConfigParser.RawConfigParser()
         config.read('../conf/syngularity.conf')
@@ -53,7 +117,8 @@ class sync(object):
 
     def rsync_config(self):
         config = ConfigParser.RawConfigParser()
-        args = '{0} {1} {2}'.format(self.rsync_bin, '-ltrRp', '--delete')
+        args = '{0} {1} {2}'.format(self.rsync_bin,\
+                "-ltrRp -e 'ssh -i {0}' ".format('../var/keys/private.key'), '--delete')
         if configchk('sync','exclude') is not None:
             args += ' --exclude {0}'.format(config.get('sync','exclude'))
         return args
@@ -61,18 +126,17 @@ class sync(object):
     def state_transfer(self, recipient):
         logging().write('i','State transfer requested by {0}'.format(recipient))
         #health = 3
-        p = subprocess.Popen('{0} {1} {2}@{3}:{1}'\
-                .format(self.cmd, self.target, self.user, recipient))
+        p = subprocess.Popen('{0} {1} {2}@{3}:/'\
+                .format(self.cmd, self.target, self.user, recipient), shell=True)
         p.communicate()
         #health = 0
         logging().write('i','State transfer with {0} complete'.format(recipient))
         return 0
 
-
     def file_sync(self, path, recipient):
         try:
             p = subprocess.Popen('{0} {1} {2}@{3}:/'\
-                    .format(self.cmd, path, self.user, recipient),shell=True)
+                    .format(self.cmd, path, self.user, recipient), shell=True)
             p.communicate()
             if self.lvl is 'DEBUG':
                 self.log.write('d', '{0} - Sync - {1}'.format(recipient, path))
@@ -111,6 +175,7 @@ def worker(q, peers, sync):
             except:
                 continue
 
+
 class delta(object):
 
     def __init__(self,top, csn):
@@ -138,6 +203,7 @@ class delta(object):
             else:
                 pass
 
+
 class peer_exec(object):
 
     def __init__(self, peers):
@@ -155,6 +221,7 @@ class peer_exec(object):
         for handle in self.handles:
             self.handles[handle].send(msg)
 
+
 def configchk(section, config):
     config = ConfigParser.RawConfigParser()
     config.read('../conf/syngularity.conf')
@@ -162,6 +229,22 @@ def configchk(section, config):
         return config.get(section,config)
     except:
         return None
+
+def mkdir_p(dir):
+    try:
+        os.stat(dir)
+    except:
+        os.mkdir(dir)
+
+def state_request(enabled, peers, log):
+    for peer in peers:
+        p = peer.split(':')
+        r = client(p[0], p[1]).state_transfer()
+        if r[3] is '0':
+            return 0
+    else:
+        log.write('i', 'Node is in bootstrap mode. Skipping state transfer.')
+
 
 def daemonize():
     try:
