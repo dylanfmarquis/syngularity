@@ -48,13 +48,13 @@ if __name__ == "__main__":
 
     bootstrap = config.get('general','boostrap_mode')
 
-    #MAKE SURE IT'S RECEIVING UPDATES WHILE ITS STATE TRANSFERRING
     if 'disabled' in bootstrap:
         for peer in peers:
             l = peer.split(':')
             client(l[0],l[1]).peer(keys)
-        state_request(peers, log)
-
+        st_req = Process(target=state_request, args=(peers, log))
+        st_req.daemon = True
+        st_req.start()
 
     log.write('i', 'Starting MQ server')
     l = Process(target=mq_server, args=('5555', ServerReqHandler, sync, keys, log))
@@ -78,33 +78,31 @@ if __name__ == "__main__":
     # USE MASK TO REMOVE PEERS THAT AREN'T UP
     class EventHandler(pyinotify.ProcessEvent):
         def process_IN_CREATE(self, event):
-            if ext_exclude.findall(event.pathname):
+            if hidden_file_filter(event.pathname):
                 pass
             else:
                 q.put([0, event.pathname])
 
         def process_IN_MOVED_TO(self, event):
-            if ext_exclude.findall(event.pathname):
-                print event.pathname
+            if hidden_file_filter(event.pathname):
                 pass
             else:
                 q.put([0, event.pathname])
 
         def process_IN_MOVED_FROM(self, event):
-            if ext_exclude.findall(event.pathname):
-                print event.pathname
+            if hidden_file_filter(event.pathname):
                 pass
             else:
                 q.put([1, event.pathname])
 
         def process_IN_CLOSE_WRITE(self, event):
-            if ext_exclude.findall(event.pathname):
+            if hidden_file_filter(event.pathname):
                 pass
             else:
                 q.put([0, event.pathname])
 
         def process_IN_DELETE(self, event):
-            if ext_exclude.findall(event.pathname):
+            if hidden_file_filter(event.pathname):
                 pass
             else:
                 q.put([1, event.pathname])

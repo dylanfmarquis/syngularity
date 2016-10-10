@@ -121,13 +121,13 @@ class sync(object):
         return args
 
     def state_transfer(self, recipient):
-        logging().write('i','State transfer requested by {0}'.format(recipient))
         #health = 3
+        logging().write('i','State transfer requested by {0}'.format(recipient))
         p = subprocess.Popen('{0} {1} {2}@{3}:/'\
                 .format(self.cmd, self.target, self.user, recipient), shell=True)
         p.communicate()
-        #health = 0
         logging().write('i','State transfer with {0} complete'.format(recipient))
+        #health = 0
         return 0
 
     def file_sync(self, path, recipient):
@@ -242,6 +242,11 @@ def state_request(peers, log):
     else:
         log.write('i', 'Node is in bootstrap mode. Skipping state transfer.')
 
+def hidden_file_filter(path):
+    array = path.split('/')
+    if array[len(array)-1][0] is '.':
+        return True
+    return False
 
 def daemonize():
     try:
