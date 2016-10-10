@@ -23,8 +23,8 @@ def gen(num):
 
 
 
-threads = 10
-total = 30
+threads = 20
+total = 200
 t = []
 
 for x in range(threads, total):

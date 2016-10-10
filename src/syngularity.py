@@ -44,6 +44,8 @@ if __name__ == "__main__":
     #    print 'exit: ' + ret
     #    sys.exit()
 
+    sync = sync()
+
     bootstrap = config.get('general','boostrap_mode')
 
     #MAKE SURE IT'S RECEIVING UPDATES WHILE ITS STATE TRANSFERRING
@@ -53,7 +55,6 @@ if __name__ == "__main__":
             client(l[0],l[1]).peer(keys)
         state_request(peers, log)
 
-    sync = sync()
 
     log.write('i', 'Starting MQ server')
     l = Process(target=mq_server, args=('5555', ServerReqHandler, sync, keys, log))

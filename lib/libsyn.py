@@ -1,5 +1,3 @@
-#import sys
-#sys.path.append('../lib')
 import os
 import time
 import pyinotify
@@ -7,7 +5,7 @@ import sys
 import datetime
 import threading
 import subprocess
-import base64
+import hashlib
 import ConfigParser
 from libmsgq import *
 from stat import *
@@ -15,7 +13,6 @@ from pwd import getpwnam
 from time import strftime as date
 from subprocess import PIPE
 from subprocess import Popen as popen
-from Crypto.PublicKey import RSA
 
 
 class logging(object):
@@ -48,30 +45,33 @@ class keys(object):
     def __init__(self):
         keys = self.keypair()
         self.private = keys[0]
-        self.public = self.public_format(keys[1])
+        self.public = keys[1]
 
     def keypair(self):
-        if os.path.isfile('../var/keys/private.key')\
-                and os.path.isfile('../var/keys/public.key'):
-            keys = []
-            with open ('../var/keys/private.key', 'r') as priv:
+        keys = []
+        if os.path.isfile('../var/keys/id_rsa')\
+                and os.path.isfile('../var/keys/id_rsa.pub'):
+            with open ('../var/keys/id_rsa', 'r') as priv:
                 keys.append(priv.read())
-            with open('../var/keys/public.key', 'r') as pub:
+            with open('../var/keys/id_rsa.pub', 'r') as pub:
                 keys.append(pub.read())
-            return keys
         else:
-            keys = []
-            key = RSA.generate(2048)
-            keys.append(key.exportKey("PEM"))
-            keys.append(key.publickey().exportKey("PEM"))
-            with open ('../var/keys/private.key', 'w') as priv:
-                priv.write(keys[0])
-            with open('../var/keys/public.key', 'w') as pub:
-                pub.write(keys[1])
-            return keys
+            config = ConfigParser.RawConfigParser()
+            config.read('../conf/syngularity.conf')
+            ssh_bin = config.get('general','ssh-keygen_bin')
+            p = subprocess.Popen("{0} -f ../var/keys/id_rsa -t rsa -N ''"
+                    .format(ssh_bin), stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=True)
+            p.communicate()
+            os.chmod('../var/keys/id_rsa', 0400)
+            os.chmod('../var/keys/id_rsa.pub',  0400)
+            with open('../var/keys/id_rsa', 'r') as f:
+                keys.append(f.read())
+            with open('../var/keys/id_rsa.pub', 'r') as f:
+                keys.append(f.read())
+        return keys
 
     def store(self, host, key):
-        id = base64.b64encode(host)
+        id = hashlib.md5(host).hexdigest()
         with open('../var/keys/{0}'.format(id), 'w') as f:
             f.write(key)
         config = ConfigParser.RawConfigParser()
@@ -82,7 +82,7 @@ class keys(object):
 
         if not os.path.isfile(auth_keys_path):
             open(auth_keys_path, 'a').close()
-            os.chmod(auth_keys_path, 600)
+            os.chmod(auth_keys_path, 0600)
             try:
                 os.chown(auth_keys_path, getpwnam(user).pw_uid, getpwnam(user).pw_gid)
             except:
@@ -93,14 +93,10 @@ class keys(object):
             for line in contents:
                 if key in line:
                     return 0
-            f.write('ssh-rsa {0} {1}@{2}'.format(key, user, id))
-            return 0
+            f.write(key)
 
-    def public_format(self, public):
-        return public.replace('-----BEGIN PUBLIC KEY-----', '')\
-                     .replace('-----END PUBLIC KEY-----', '')\
-                     .replace('\r', '').replace('\n', '')
-
+        os.chmod(auth_keys_path, 0600)
+        return 0
 
 class sync(object):
 
@@ -118,7 +114,8 @@ class sync(object):
     def rsync_config(self):
         config = ConfigParser.RawConfigParser()
         args = '{0} {1} {2}'.format(self.rsync_bin,\
-                "-ltrRp -e 'ssh -i {0}' ".format('../var/keys/private.key'), '--delete')
+                "-ltrRp -e 'ssh -o StrictHostKeyChecking=no -i {0}' "\
+                .format('../var/keys/id_rsa'), '--delete')
         if configchk('sync','exclude') is not None:
             args += ' --exclude {0}'.format(config.get('sync','exclude'))
         return args
@@ -149,8 +146,8 @@ class sync(object):
 
     def file_del(self, path, recipient):
        try:
-            p = subprocess.Popen('ssh {0}@{1} "rm -rf {2}"'\
-                    .format( self.user, recipient, path),shell=True)
+            p = subprocess.Popen('ssh -o StrictHostKeyChecking=no -i {0} {1}@{2} "rm -rf {3}"'\
+                    .format('../var/keys/id_rsa', self.user, recipient, path),shell=True)
             p.communicate()
             if self.lvl is 'DEBUG':
                 self.log.write('d', '{0} - Delete - {1}'.format(recipient, path))
@@ -236,7 +233,7 @@ def mkdir_p(dir):
     except:
         os.mkdir(dir)
 
-def state_request(enabled, peers, log):
+def state_request(peers, log):
     for peer in peers:
         p = peer.split(':')
         r = client(p[0], p[1]).state_transfer()

@@ -31,7 +31,7 @@ class client(object):
 
     def peer(self, keys):
         r = self.send('REQ|PEER|{0}|{1}'.format(keys.public, self.origin))
-        keys.store(self.host,r)
+        keys.store(self.host, r.split('|')[2])
         return 0
 
     def state_transfer(self):
