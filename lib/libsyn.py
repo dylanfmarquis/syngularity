@@ -13,6 +13,7 @@ from pwd import getpwnam
 from time import strftime as date
 from subprocess import PIPE
 from subprocess import Popen as popen
+from multiprocessing import Process
 
 
 class logging(object):
@@ -121,14 +122,13 @@ class sync(object):
         return args
 
     def state_transfer(self, recipient):
-        #health = 3
         logging().write('i','State transfer requested by {0}'.format(recipient))
+        health = 3
         p = subprocess.Popen('{0} {1} {2}@{3}:/'\
                 .format(self.cmd, self.target, self.user, recipient), shell=True)
         p.communicate()
+        health = 0
         logging().write('i','State transfer with {0} complete'.format(recipient))
-        #health = 0
-        return 0
 
     def file_sync(self, path, recipient):
         try:
@@ -172,6 +172,36 @@ def worker(q, peers, sync):
             except:
                 continue
 
+def worker_throttled(q, peers, sync):
+    i = 0
+    while True:
+        while i < 5:
+            while not q.empty():
+                job = q.get(block=True)
+                try:
+                    if job[0] is 0:
+                        sync.push(job[1], peers)
+                    else:
+                        sync.delete(job[1], peers)
+                    q.task_done()
+                except:
+                    continue
+            i += 1
+        time.sleep(0.1)
+        i=0
+
+def worker(q, peers, sync):
+    while True:
+        while not q.empty():
+            job = q.get(block=True)
+            try:
+                if job[0] is 0:
+                    sync.push(job[1], peers)
+                else:
+                    sync.delete(job[1], peers)
+                q.task_done()
+            except:
+                continue
 
 class delta(object):
 

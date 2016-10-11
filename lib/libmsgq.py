@@ -53,7 +53,7 @@ def repbuild(resp, payload):
 def ServerReqHandler(msg, sync, keys, log):
     req = msg.split('|')
     if 'HEALCHK' in req[1]:
-        return repbuild('HEALCHK', health)
+        return repbuild('HEALCHK')
 
     if 'PEER' in req[1]:
         log.write('i','{0} has made a peer request'.format(req[3]))
