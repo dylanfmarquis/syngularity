@@ -7,13 +7,13 @@ ext_modules=[
             Extension("libmsgq",             ["lib/libmsgq.py"]),
             Extension("libsyn",              ["lib/libsyn.py"]),
             Extension("syngularity",         ["src/syngularity.py"]),
-                    ]
+]
 
 setup(
           name = 'syngularity',
             cmdclass = {'build_ext': build_ext},
               ext_modules = ext_modules,
-              )
+)
 
 subprocess.Popen('mkdir -p ./shared', stdout=subprocess.PIPE,stderr=subprocess.PIPE, shell=True)
 subprocess.Popen('mkdir -p ./bin', stdout=subprocess.PIPE,stderr=subprocess.PIPE, shell=True)
